@@ -1,4 +1,4 @@
--- This is simply a file to set up the simply typed lambda calculus, and
+-- This is simplly a file to set up the simply typed lambda calculus, and
 -- generate terms within it
 
 type Id = String
