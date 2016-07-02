@@ -181,8 +181,11 @@ var_prims t = elements [ELam "id" (EVar "id" t) $ TArr t t,
 typ_prims :: [Id]
 typ_prims = ["tau", "phi", "sigma", "nat", "bool"]
 
-sys_type :: Int -> Gen Typ
-sys_type sz = resize sz $ sized (typ [])
+diff_list :: Ord a => [a] -> [a] -> [a]
+diff_list l ll = Set.toList $ Set.difference (Set.fromList l) (Set.fromList ll)
+
+f_type :: Int -> Gen Typ
+f_type sz = resize sz $ sized (typ [])
   where
     typ :: Integral a => [Id] -> a -> Gen Typ
     typ []      0 = error "Cannot create a variable with no inputs"
@@ -194,10 +197,11 @@ sys_type sz = resize sz $ sized (typ [])
       oneof [ TVar <$> (elements symbols),
               let smaller = typ symbols (n `div` 2) in
                 liftA2 TArr smaller smaller,
-              do
-                v <- elements $ typ_prims
-                t <- typ (v:symbols) (n-1)
-                return (TAll v t)
+              do 
+                fresh <- elements $ diff_list typ_prims symbols
+                tau <- typ (symbols) n
+                (_, tau')  <- make_app_type fresh tau
+                return (TAll fresh tau')
             ]
 
 
@@ -214,7 +218,7 @@ swp f a b = f b a
 
 
 f_term :: Gen Expr
-f_term = resize 10 $ (sys_type 10) >>= (sized . (typ_terms Map.empty))
+f_term = resize 10 $ (f_type 10) >>= (sized . (typ_terms Map.empty))
 
 typ_terms :: VarContext -> Typ -> Int -> Gen Expr
 typ_terms gam t 0 =
@@ -251,7 +255,7 @@ evargen :: VarContext -> Typ -> Gen Expr
 evargen gam tau =
   let valid_scope = map fst $ filter (\(e,tau') -> tau == tau') $ Map.toList gam in
     if length valid_scope <= 0
-    then error $ "Invalid Scope (" ++ show gam ++") for : " ++ show tau
+    then error $ "Invalid Scope: No term of type" ++ show tau ++ " in(" ++ show gam ++")"
     else swp EVar tau <$> elements valid_scope
 
 elamgen :: VarContext -> Typ -> Typ -> Int -> Gen Expr
@@ -262,7 +266,7 @@ elamgen gam tin taus n = let used_vars = Set.fromList $ map fst $ Map.toList gam
                                 return $ ELam fresh exp $ TArr tin taus
 
 eappgen :: VarContext -> Typ -> Int -> Gen Expr
-eappgen gam tau n =  do arg_type <- sys_type 1
+eappgen gam tau n =  do arg_type <- f_type 1
                         e  <- typ_terms gam (TArr arg_type tau) $ n `div` 2
                         e' <- typ_terms gam arg_type            $ n `div` 2
                         return $ EApp e e' tau
@@ -299,13 +303,13 @@ replace hole tau t@(TArr t' t'') =
       TArr (smaller t') (smaller t'')
 replace hole tau t@(TAll x t') = if hole == t
                                  then tau
-                                 else t -- is this right? if its wrong its an underfit
+                                 else t -- is this right? if its wrong its only an underfit
 
 instance Arbitrary Expr where
   arbitrary = f_term
 
 instance Arbitrary Typ where
-  arbitrary = resize 10 $ sized sys_type
+  arbitrary = resize 10 $ sized f_type
 
 prop_wellTyped :: Expr -> Bool
 prop_wellTyped = fst . (well_typed Set.empty Map.empty)
@@ -330,15 +334,15 @@ mkctx =
 evartest :: Gen Expr
 evartest =
   let (s, g, d) = mkctx in 
-      (sys_type 2) >>= (evargen g)
+      (f_type 2) >>= (evargen g)
          
 
 elamtest :: Gen Expr
 elamtest =
   let (_, g, d) = mkctx in
-  do tin <- sys_type 3
-     tout <- sys_type 3
-     n <- choose (0,4)
+  do tin  <- f_type 3
+     tout <- f_type 3
+     n <- choose(0,4)
      elamgen Map.empty tin tout n
 
 bigcheck = (quickCheckWith stdArgs {maxSuccess = 5000})
